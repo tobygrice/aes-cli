@@ -1,10 +1,8 @@
-use std::vec;
-
 use super::decryption::decrypt_block;
 use super::encryption::encrypt_block;
 use super::error::*;
 use super::key::expand_key;
-use super::util::{blockify, ctr_block, pad, unpad, xor_block};
+use super::util::{blockify, blockify_pad, ctr_block, unpad, xor_block};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -14,10 +12,10 @@ pub enum Mode {
 }
 
 pub(crate) fn encrypt_ecb(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-    let round_keys = expand_key(&key)?;
-    let plaintext = blockify(pad(plaintext))?;
+    let round_keys = expand_key(key)?;
+    let plaintext = blockify_pad(plaintext);
 
-    let mut ciphertext: Vec<u8> = vec![];
+    let mut ciphertext: Vec<u8> = Vec::with_capacity(plaintext.len() * 16);
     for block in plaintext {
         let enc_block = encrypt_block(&block, &round_keys);
         ciphertext.append(&mut enc_block.into_iter().flatten().collect());
@@ -27,16 +25,17 @@ pub(crate) fn encrypt_ecb(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub(crate) fn decrypt_ecb(ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-    let round_keys = expand_key(&key)?;
-    let ciphertext = blockify(ciphertext.to_vec())?;
+    let round_keys = expand_key(key)?;
+    let ciphertext = blockify(ciphertext)?;
 
-    let mut plaintext: Vec<u8> = vec![];
+    let mut plaintext: Vec<u8> = Vec::with_capacity(ciphertext.len() * 16);
     for block in ciphertext {
         let dec_block = decrypt_block(&block, &round_keys);
         plaintext.append(&mut dec_block.into_iter().flatten().collect());
     }
 
-    Ok(unpad(&plaintext))
+    unpad(&mut plaintext);
+    Ok(plaintext)
 }
 
 pub(crate) fn ctr(input: &[u8], key: &[u8], iv: &[u8; 12], ctr_start: u32) -> Result<Vec<u8>> {

@@ -2,6 +2,7 @@ use super::constants::SBOX_INV;
 use super::key::add_round_key;
 use super::util::dbl;
 
+#[inline(always)]
 pub(crate) fn decrypt_block(plaintext: &[[u8; 4]; 4], round_keys: &[[[u8; 4]; 4]]) -> [[u8; 4]; 4] {
     let mut state = plaintext.clone();
     let num_rounds = round_keys.len();
@@ -22,7 +23,7 @@ pub(crate) fn decrypt_block(plaintext: &[[u8; 4]; 4], round_keys: &[[[u8; 4]; 4]
     state
 }
 
-#[inline]
+#[inline(always)]
 fn sub_bytes_inv(state: &mut [[u8; 4]; 4]) {
     for word in state {
         for byte in word {
@@ -31,7 +32,7 @@ fn sub_bytes_inv(state: &mut [[u8; 4]; 4]) {
     }
 }
 
-#[inline]
+#[inline(always)]
 fn shift_rows_inv(state: &mut [[u8; 4]; 4]) {
     let s = *state;
     *state = [
@@ -43,7 +44,7 @@ fn shift_rows_inv(state: &mut [[u8; 4]; 4]) {
 }
 
 // optimisation by https://crypto.stackexchange.com/a/71206
-#[inline]
+#[inline(always)]
 fn mix_columns_inv(state: &mut [[u8; 4]; 4]) {
     for word in state {
         let (a, b, c, d) = (word[0], word[1], word[2], word[3]);
