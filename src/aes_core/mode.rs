@@ -60,79 +60,66 @@ pub(crate) fn ctr(input: &[u8], key: &[u8], iv: &[u8; 12], ctr_start: u32) -> Re
 }
 
 /*
+https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf
+diagram on page 5
+
 H = 128 0s encrypted with key
-Start with Y = 0
-For each 16-byte block B:
-    Y = (Y XOR B) multiplied by H
+start with accumulator s = 0
+for each 16-byte block b:
+    s = (s ^ b) * H (GF128 multiplication)
 
-The blocks are:
-    All AAD blocks (padded)
-    All ciphertext blocks (padded)
-    One final length block
+where blocks are:
+    - all AAD blocks (padded)
+    - all ciphertext blocks (padded)
+    - one block containing aad.len + ct.len
+
+final tag = s ^ encrypt_block(J0, key)
+
+where J0 is:
+    - IV || 1u32 (initial ctr block for ctr = 1)
 */
-
-// message structure: iv (96 bits) || aad len (32 bits) || aad || ciphertext || tag (128 bits)
-pub(crate) fn gcm(
-    input: &[u8],
-    key: &[u8],
-    iv: &[u8; 12],
-    aad: &[u8],
-) -> Result<(Vec<u8>, [u8; 16])> {
-    let round_keys = expand_key(&key)?;
-    let mut output = Vec::with_capacity(input.len());
+pub(crate) fn compute_tag(ciphertext: &[u8], key: &[u8], iv: &[u8; 12], aad: &[u8]) -> Result<[u8; 16]> {
+    let round_keys = expand_key(key)?;
 
     // create inital ctr block (xor'd with tag at end)
-    let mut ctr: u32 = 1; 
-    let j0 = ctr_block(iv, ctr); // form block from iv + ctr
+    let j0 = ctr_block(iv, 1);
     let j0_e = flatten_block(encrypt_block(&j0, &round_keys));
-    ctr += 1;
 
     // generate H by encrypting block of 0s
     let h = flatten_block(encrypt_block(&[[0u8; 4]; 4], &round_keys));
-    let mut tag = [0u8; 16];
 
-    // compute tag over AAD
+    // s = ghash accumulator
+    let mut s = [0u8; 16];
+
+    // compute s over AAD
     for aad_chunk in aad.chunks(16) {
-        tag = gf_mul(xor_chunks(&tag, aad_chunk), h);
+        s = gf_mul(xor_chunks(&s, aad_chunk), h);
     }
 
-    // encryption
-    for chunk in input.chunks(16) {
-        let block = ctr_block(iv, ctr); // form block from iv + ctr
-        // encrypt block
-        // xor each element of chunk (1-16 bytes) with corresponding elem in keystream
-        let keystream = flatten_block(encrypt_block(&block, &round_keys));
-        let ct = xor_chunks(&keystream, chunk);
-        
-        // update tag
-        tag = gf_mul(xor_chunks(&tag, &ct), h);
-
-        // update output and increment ctr
-        output.extend_from_slice(&ct[..chunk.len()]);
-        ctr = match ctr.checked_add(1) {
-            Some(c) => c,
-            None => return Err(Error::CounterOverflow),
-        };
+    // compute s over ciphertext
+    for ct_chunk in ciphertext.chunks(16) {
+        s = gf_mul(xor_chunks(&s, ct_chunk), h);
     }
-    // ... end encryption
-    
-    // authenticate len
+
+    // authenticate message length, build aad_bits || ct_bits
     let aad_bits = (aad.len() as u64) * 8;
-    let ct_bits  = (input.len() as u64) * 8;
-    let mut len_block = [0u8; 16];
-    len_block[..8].copy_from_slice(&aad_bits.to_be_bytes());
-    len_block[8..].copy_from_slice(&ct_bits.to_be_bytes());
+    let ct_bits = (ciphertext.len() as u64) * 8;
+    let mut len = [0u8; 16];
+    len[..8].copy_from_slice(&aad_bits.to_be_bytes());
+    len[8..].copy_from_slice(&ct_bits.to_be_bytes());
 
-    tag = gf_mul(xor_chunks(&tag, &len_block), h);
-    tag = xor_chunks(&tag, &j0_e);
-    Ok((output, tag))
+    s = gf_mul(xor_chunks(&s, &len), h);
+
+    // tag = E(K, J0) ^ S
+    Ok(xor_chunks(&s, &j0_e))
 }
 
+
 #[cfg(test)]
-mod tests {
+mod test_ecb_ctr {
     use super::*;
 
-    // all test vectors from NIST 800-38a
+    // all test vectors from
     // https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
 
     const PLAINTEXT: [u8; 64] = [
@@ -409,13 +396,117 @@ mod tests {
         Ok(())
     }
 
-    // hex_to_bytes written by an LLM
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
+    pub(super) fn hex_to_bytes(s: &str) -> Vec<u8> {
         let s = s.trim();
         assert!(s.len() % 2 == 0, "hex string must have even length");
         (0..s.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
             .collect()
+    }
+}
+
+// gcm tests written with LLM assistance
+#[cfg(test)]
+mod test_gcm {
+    use super::*;
+    use super::test_ecb_ctr::hex_to_bytes;
+
+    // all test vectors from
+    // https://boringssl.googlesource.com/boringssl.git/%2B/734fca08902889c88e84839134262bdf5c12eebf/crypto/cipher/cipher_test.txt
+
+    #[test]
+    fn tag_no_pt_no_aad() {
+        // Vector:
+        // key = 00..00 (16 bytes)
+        // iv  = 00..00 (12 bytes)
+        // aad = empty
+        // ct  = empty
+        // tag = 58e2fccefa7e3061367f1d57a4e7455a
+        let key = hex_to_bytes("00000000000000000000000000000000");
+        let iv = hex_to_arr_12("000000000000000000000000");
+        let aad: [u8; 0] = [];
+        let ciphertext: [u8; 0] = [];
+
+        let tag = compute_tag(&ciphertext, &key, &iv, &aad).unwrap();
+        assert_eq!(tag, hex_to_arr_16("58e2fccefa7e3061367f1d57a4e7455a"));
+    }
+
+    #[test]
+    fn tag_no_aad_1() {
+        // Vector:
+        // key = 00..00 (16 bytes)
+        // iv  = 00..00 (12 bytes)
+        // pt  = 00..00 (16 bytes)
+        // ct  = 0388dace60b6a392f328c2b971b2fe78
+        // aad = empty
+        // tag = ab6e47d42cec13bdf53a67b21257bddf
+        let key = hex_to_bytes("00000000000000000000000000000000");
+        let iv = hex_to_arr_12("000000000000000000000000");
+        let aad: [u8; 0] = [];
+        let ciphertext = hex_to_bytes("0388dace60b6a392f328c2b971b2fe78");
+
+        let tag = compute_tag(&ciphertext, &key, &iv, &aad).unwrap();
+        assert_eq!(tag, hex_to_arr_16("ab6e47d42cec13bdf53a67b21257bddf"));
+    }
+
+    #[test]
+    fn tag_no_aad_2() {
+        // Vector:
+        // key = feffe9928665731c6d6a8f9467308308
+        // iv  = cafebabefacedbaddecaf888
+        // aad = empty
+        // ct  = 42831e...3f5985
+        // tag = 4d5c2af327cd64a62cf35abd2ba6fab4
+        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308");
+        let iv = hex_to_arr_12("cafebabefacedbaddecaf888");
+        let aad: [u8; 0] = [];
+        let ciphertext = hex_to_bytes(
+            "42831ec2217774244b7221b784d0d49c\
+             e3aa212f2c02a4e035c17e2329aca12e\
+             21d514b25466931c7d8f6a5aac84aa05\
+             1ba30b396a0aac973d58e091473f5985",
+        );
+
+        let tag = compute_tag(&ciphertext, &key, &iv, &aad).unwrap();
+        assert_eq!(tag, hex_to_arr_16("4d5c2af327cd64a62cf35abd2ba6fab4"));
+    }
+
+    #[test]
+    fn tag_with_aad() {
+        // Vector:
+        // key = feffe9928665731c6d6a8f9467308308
+        // iv  = cafebabefacedbaddecaf888
+        // aad = feedfacedeadbeeffeedfacedeadbeefabaddad2
+        // ct  = 42831e...58e091
+        // tag = 5bc94fbc3221a5db94fae95ae7121a47
+        let key = hex_to_bytes("feffe9928665731c6d6a8f9467308308");
+        let iv = hex_to_arr_12("cafebabefacedbaddecaf888");
+        let aad = hex_to_bytes("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+        let ciphertext = hex_to_bytes(
+            "42831ec2217774244b7221b784d0d49c\
+             e3aa212f2c02a4e035c17e2329aca12e\
+             21d514b25466931c7d8f6a5aac84aa05\
+             1ba30b396a0aac973d58e091",
+        );
+
+        let tag = compute_tag(&ciphertext, &key, &iv, &aad).unwrap();
+        assert_eq!(tag, hex_to_arr_16("5bc94fbc3221a5db94fae95ae7121a47"));
+    }
+
+    fn hex_to_arr_12(hex: &str) -> [u8; 12] {
+        let v = hex_to_bytes(hex);
+        assert_eq!(v.len(), 12);
+        let mut out = [0u8; 12];
+        out.copy_from_slice(&v);
+        out
+    }
+
+    fn hex_to_arr_16(hex: &str) -> [u8; 16] {
+        let v = hex_to_bytes(hex);
+        assert_eq!(v.len(), 16);
+        let mut out = [0u8; 16];
+        out.copy_from_slice(&v);
+        out
     }
 }

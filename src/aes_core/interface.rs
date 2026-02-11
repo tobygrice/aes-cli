@@ -13,17 +13,20 @@ pub fn encrypt(plaintext: &[u8], key: &[u8], mode: Mode) -> Result<Vec<u8>> {
             Ok(ciphertext)
         }
         Mode::ModeGCM => {
-            // generate IV and prepend to ciphertext
             let iv = random_iv()?;
-            let mut ciphertext: Vec<u8> = iv.to_vec();
+            let mut out: Vec<u8> = iv.to_vec();
 
-            let mut aad_len = vec![0x00, 0x00, 0x00, 0x00];
-            ciphertext.append(&mut aad_len);
+            // prepend AAD len and AAD (currently no option for AAD implemented)
+            out.extend_from_slice(&0u32.to_be_bytes());
+            // out.extend_from_slice(aad);
 
-            let (mut ct, tag) = gcm(&plaintext, key, &iv, &[])?;
-            ciphertext.append(&mut ct);
-            ciphertext.append(&mut tag.to_vec());
-            Ok(ciphertext)
+            // compute ciphertext and tag
+            let mut ct = ctr(plaintext, key, &iv, 2)?;
+            let tag = compute_tag(&ct, key, &iv, &[])?; // AAD is empty for now
+
+            out.append(&mut ct);
+            out.extend_from_slice(&tag);
+            Ok(out)
         }
     }
 }
@@ -38,7 +41,7 @@ pub fn decrypt(ciphertext: &[u8], key: &[u8], mode: Mode) -> Result<Vec<u8>> {
                     len: ciphertext.len(),
                     context: "CTR: missing 12-byte IV",
                 });
-            }            
+            }
 
             let (iv_bytes, ciphertext) = ciphertext.split_at(12);
             let mut iv = [0u8; 12];
@@ -47,49 +50,44 @@ pub fn decrypt(ciphertext: &[u8], key: &[u8], mode: Mode) -> Result<Vec<u8>> {
             ctr(ciphertext, key, &iv, 0)
         }
         Mode::ModeGCM => {
-            // extract and remove IV from ciphertext
-            if ciphertext.len() < 12 + 4 + 16 {
+            // minimum size is 32 bytes -> 12 (iv) + 4 (aad_len) + 16 (tag)
+            if ciphertext.len() < 32 {
                 return Err(Error::InvalidCiphertext {
                     len: ciphertext.len(),
-                    context: "insufficient bytes for valid GCM message",
+                    context: "insufficient bytes for valid GCM",
                 });
             }
 
+            // extract IV
             let (iv_bytes, ciphertext) = ciphertext.split_at(12);
             let mut iv = [0u8; 12];
             iv.copy_from_slice(iv_bytes);
 
-            let (aad_len_bytes, ciphertext) = ciphertext.split_at(4);
-            let aad_len = u32::from_be_bytes([
-                aad_len_bytes[0],
-                aad_len_bytes[1],
-                aad_len_bytes[2],
-                aad_len_bytes[3],
-            ]) as usize;
-
-            // expect minimum aad_len + 16 byte tag left (no ciphertext)
-            if ciphertext.len() < aad_len + 16 {
+            // extract AAD len and validate remaining size
+            let (aad_len, ciphertext) = ciphertext.split_at(4);
+            let aad_len = u32::from_be_bytes([aad_len[0], aad_len[1], aad_len[2], aad_len[3]]);
+            if ciphertext.len() < aad_len as usize + 16 {
                 return Err(Error::InvalidCiphertext {
                     len: ciphertext.len(),
                     context: "insufficient bytes given aad_len",
                 });
             }
 
-            let (aad, ciphertext) = ciphertext.split_at(aad_len);
-            let (ciphertext, tag_bytes) = ciphertext.split_at(ciphertext.len() - 16);
+            // extract aad, ciphertext, and tag
+            let (aad, ciphertext) = ciphertext.split_at(aad_len as usize);
+            let (ct, tag_bytes) = ciphertext.split_at(ciphertext.len() - 16);
 
-            let mut tag = [0u8; 16];
-            tag.copy_from_slice(tag_bytes);
+            // format tag to [u8; 16]
+            let mut received_tag = [0u8; 16];
+            received_tag.copy_from_slice(tag_bytes);
 
-            let (mut pt, recv_tag) = gcm(&ciphertext, key, &iv, &[])?;
-
-            if tag != recv_tag {
+            let computed_tag = compute_tag(ct, key, &iv, aad)?;
+            if received_tag != computed_tag {
                 return Err(Error::AuthFailed);
             }
 
-            let mut output = aad.to_vec();
-            output.append(&mut pt);
-            Ok(output)
+            // run ctr starting at 2, as per NIST spec
+            ctr(ct, key, &iv, 2)
         }
     }
 }

@@ -5,7 +5,8 @@ Planned features:
 - [x] CLI using clap, supporting random key generation for encryption
 - [x] Robust library error handling using `thiserror` crate
 - [x] Counter mode of operation (CTR)
-- [ ] Galois counter mode (GCM)
+- [x] Galois counter mode (GCM)
+- [ ] GCM with AAD
 - [ ] Encryption and decryption in parallel
 
 ## Usage
