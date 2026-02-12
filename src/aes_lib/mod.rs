@@ -6,5 +6,5 @@ mod mode;
 mod util;
 
 pub use error::{Error, Result};
-pub use key::{Key, KeySize};
+pub use key::Key;
 pub use cipher::Cipher;

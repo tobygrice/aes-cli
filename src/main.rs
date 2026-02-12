@@ -47,9 +47,9 @@ fn aes_cli() -> Result<(), CliError> {
             // read or generate key
             let key = if enc.gen_key {
                 let rand_key = match enc.key_size {
-                    args::KeySize::Bits128 => aes::Key::random_key(aes::KeySize::Bits128)?,
-                    args::KeySize::Bits192 => aes::Key::random_key(aes::KeySize::Bits192)?,
-                    args::KeySize::Bits256 => aes::Key::random_key(aes::KeySize::Bits256)?,
+                    args::KeySize::Bits128 => aes::Key::rand_key_128()?,
+                    args::KeySize::Bits192 => aes::Key::rand_key_192()?,
+                    args::KeySize::Bits256 => aes::Key::rand_key_256()?,
                 };
                 fs::write(key_path, &rand_key.as_bytes())?;
                 rand_key
@@ -62,14 +62,14 @@ fn aes_cli() -> Result<(), CliError> {
             let cipher = aes::Cipher::new(&key);
 
             // parse AAD
-            let aad: Vec<u8> = match enc.aad {
+            let aad: Option<Vec<u8>> = match enc.aad {
                 Some(aad_str) => {
                     if mode != args::Mode::ModeGCM {
                         return Err(CliError::AadInvalidMode);
                     }
-                    parse_aad(&aad_str)?
+                    Some(parse_aad(&aad_str)?)
                 }
-                None => Vec::new(),
+                None => None,
             };
 
             let start = Instant::now();
@@ -78,7 +78,7 @@ fn aes_cli() -> Result<(), CliError> {
             let ciphertext = match mode {
                 args::Mode::ModeECB => cipher.encrypt_ecb(&plaintext)?,
                 args::Mode::ModeCTR => cipher.encrypt_ctr(&plaintext)?,
-                args::Mode::ModeGCM => cipher.encrypt_gcm(&plaintext, &aad)?,
+                args::Mode::ModeGCM => cipher.encrypt_gcm(&plaintext, aad.as_deref())?,
             };
 
             let duration = start.elapsed();

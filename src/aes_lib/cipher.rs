@@ -48,17 +48,18 @@ impl Cipher {
         ctr_core(ciphertext, &self.round_keys, &iv, 0)
     }
 
-    pub fn encrypt_gcm(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
+    pub fn encrypt_gcm(&self, plaintext: &[u8], aad: Option<&[u8]>) -> Result<Vec<u8>> {
         let iv = random_iv()?;
         let mut out: Vec<u8> = iv.to_vec();
 
         // prepend AAD len and AAD
-        out.extend_from_slice(&(aad.len() as u32).to_be_bytes());
-        out.extend_from_slice(aad);
+        let aad_bytes = aad.unwrap_or(&[]);
+        out.extend_from_slice(&(aad_bytes.len() as u32).to_be_bytes());
+        out.extend_from_slice(aad_bytes);
 
         // compute ciphertext and tag
         let mut ct = ctr_core(plaintext, &self.round_keys, &iv, 2)?;
-        let tag = compute_tag(&ct, &self.round_keys, &iv, aad)?;
+        let tag = compute_tag(&ct, &self.round_keys, &iv, aad_bytes)?;
 
         out.append(&mut ct);
         out.extend_from_slice(&tag);

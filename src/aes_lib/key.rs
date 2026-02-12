@@ -5,23 +5,6 @@ use crate::aes_lib::core::constants::{RCON, SBOX};
 use crate::aes_lib::error::{Error, Result};
 use crate::aes_lib::util::xor_words;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum KeySize {
-    Bits128,
-    Bits192,
-    Bits256,
-}
-
-impl KeySize {
-    pub const fn bytes(self) -> usize {
-        match self {
-            KeySize::Bits128 => 16,
-            KeySize::Bits192 => 24,
-            KeySize::Bits256 => 32,
-        }
-    }
-}
-
 #[derive(Clone)]
 enum KeyBytes {
     K128([u8; 16]),
@@ -35,30 +18,28 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn random_key(size: KeySize) -> Result<Self> {
-        match size {
-            KeySize::Bits128 => {
-                let mut k = [0u8; 16];
-                OsRng.try_fill_bytes(&mut k)?;
-                Ok(Self {
-                    bytes: KeyBytes::K128(k),
-                })
-            }
-            KeySize::Bits192 => {
-                let mut k = [0u8; 24];
-                OsRng.try_fill_bytes(&mut k)?;
-                Ok(Self {
-                    bytes: KeyBytes::K192(k),
-                })
-            }
-            KeySize::Bits256 => {
-                let mut k = [0u8; 32];
-                OsRng.try_fill_bytes(&mut k)?;
-                Ok(Self {
-                    bytes: KeyBytes::K256(k),
-                })
-            }
-        }
+    pub fn rand_key_128() -> Result<Self> {
+        let mut k = [0u8; 16];
+        OsRng.try_fill_bytes(&mut k)?;
+        Ok(Self {
+            bytes: KeyBytes::K128(k),
+        })
+    }
+
+    pub fn rand_key_192() -> Result<Self> {
+        let mut k = [0u8; 24];
+        OsRng.try_fill_bytes(&mut k)?;
+        Ok(Self {
+            bytes: KeyBytes::K192(k),
+        })
+    }
+
+    pub fn rand_key_256() -> Result<Self> {
+        let mut k = [0u8; 32];
+        OsRng.try_fill_bytes(&mut k)?;
+        Ok(Self {
+            bytes: KeyBytes::K256(k),
+        })
     }
 
     pub fn try_from_slice(bytes: &[u8]) -> Result<Self> {
@@ -74,14 +55,6 @@ impl Key {
             },
             _ => return Err(Error::InvalidKeyLength { len: bytes.len() }),
         })
-    }
-
-    pub fn size(&self) -> KeySize {
-        match self.bytes {
-            KeyBytes::K128(_) => KeySize::Bits128,
-            KeyBytes::K192(_) => KeySize::Bits192,
-            KeyBytes::K256(_) => KeySize::Bits256,
-        }
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -225,28 +198,6 @@ mod tests {
 
         assert_eq!(last, expected);
 
-        Ok(())
-    }
-
-    #[test]
-    fn test_random_key() -> Result<()> {
-        for _ in 0..100 {
-            assert_eq!(
-                Key::random_key(KeySize::Bits128)?.size(),
-                KeySize::Bits128,
-                "128 bit random key is not 16 bytes long"
-            );
-            assert_eq!(
-                Key::random_key(KeySize::Bits192)?.size(),
-                KeySize::Bits192,
-                "192 bit random key is not 24 bytes long"
-            );
-            assert_eq!(
-                Key::random_key(KeySize::Bits256)?.size(),
-                KeySize::Bits256,
-                "256 bit random key is not 32 bytes long"
-            );
-        }
         Ok(())
     }
 }
