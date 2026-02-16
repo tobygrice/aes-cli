@@ -1,23 +1,46 @@
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use crate::aesp::core::{decrypt_block, encrypt_block};
 use crate::aesp::error::*;
+use crate::aesp::modes::util::{PARALLEL_THRESHOLD, unpad};
 
 /// Core ECB encryption algorithm. Encrypts plaintext in 16-byte blocks to form ciphertext. Uses PKCS#7 padding.
-pub fn ecb_core_enc_serial(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
-    // last block needs to be PKCS#7 padded. Variables to track when to start padding:
+pub fn ecb_core_enc(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
+    let parallel = cfg!(feature = "parallel") && plaintext.len() > PARALLEL_THRESHOLD;
+
+    // last block needs to be PKCS#7 padded. Variables to track where to start padding:
     let rem_len = plaintext.len() % 16; // number of leftover bytes after chunking into 16
     let pad_len = 16 - rem_len; // number of bytes to be padded
     let chunks_len = plaintext.len() - rem_len; // number of bytes that can fit into 16-byte chunks
 
     let mut ciphertext = vec![0u8; plaintext.len() + pad_len];
 
-    // encrypt plaintext in 16-byte blocks
-    for (pt, ct) in plaintext[..chunks_len]
-        .chunks_exact(16)
-        .zip(ciphertext[..chunks_len].chunks_exact_mut(16))
-    {
-        let pt_block: &[u8; 16] = pt.try_into().unwrap(); // safe unwrap, loop guarantees exact chunks 16
-        let enc = encrypt_block(pt_block, round_keys);
-        ct.copy_from_slice(&enc);
+    // encrypt in parallel if feature enabled and size exceeds threshold
+    if parallel {
+        #[cfg(feature = "parallel")]
+        {
+            // encrypt plaintext in 16-byte blocks (parallel bulk, excluding final padded block)
+            ciphertext[..chunks_len]
+                .par_chunks_exact_mut(16)
+                .zip(plaintext[..chunks_len].par_chunks_exact(16))
+                .for_each(|(ct, pt)| {
+                    let pt_block: &[u8; 16] = pt.try_into().unwrap(); // guaranteed exact chunks 16
+                    let enc = encrypt_block(pt_block, round_keys);
+                    ct.copy_from_slice(&enc);
+                });
+        }
+    } else {
+        // parallel feature not enabled or input len below threshold
+        // encrypt serially
+        for (pt, ct) in plaintext[..chunks_len]
+            .chunks_exact(16)
+            .zip(ciphertext[..chunks_len].chunks_exact_mut(16))
+        {
+            let pt_block: &[u8; 16] = pt.try_into().unwrap(); // safe unwrap, loop guarantees exact chunks 16
+            let enc = encrypt_block(pt_block, round_keys);
+            ct.copy_from_slice(&enc);
+        }
     }
 
     // PKCS#7 pad final block
@@ -32,8 +55,10 @@ pub fn ecb_core_enc_serial(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Result<
     Ok(ciphertext)
 }
 
-/// Core ECB decryption algorithm. Decrypts plaintext in 16-byte blocks to form plaintext. Assumes plaintext was PKCS#7 padded.
-pub fn ecb_core_dec_serial(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
+/// Core ECB decryption algorithm. Decrypts ciphertext in 16-byte blocks to form plaintext. Assumes ciphertext was PKCS#7 padded.
+pub fn ecb_core_dec(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
+    let parallel = cfg!(feature = "parallel") && ciphertext.len() > PARALLEL_THRESHOLD;
+
     // ECB ciphertext should (and must) always be a multiple of 16 bytes.
     if ciphertext.len() % 16 != 0 {
         return Err(Error::InvalidCiphertext {
@@ -44,33 +69,44 @@ pub fn ecb_core_dec_serial(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Result
 
     let mut plaintext = vec![0u8; ciphertext.len()];
 
-    // decrypt ciphertext in 16-byte blocks
-    for (ct, pt) in ciphertext
-        .chunks_exact(16)
-        .zip(plaintext.chunks_exact_mut(16))
-    {
-        let ct_block: &[u8; 16] = ct.try_into().unwrap(); // safe unwrap, loop guarantees exact chunks 16
-        let dec = decrypt_block(ct_block, round_keys);
-        pt.copy_from_slice(&dec);
+    // decrypt in parallel if feature enabled and size exceeds threshold
+    if parallel {
+        #[cfg(feature = "parallel")]
+        {
+            // decrypt ciphertext in 16-byte blocks
+            ciphertext
+                .par_chunks_exact(16)
+                .zip(plaintext.par_chunks_exact_mut(16))
+                .for_each(|(ct, pt)| {
+                    let ct_block: &[u8; 16] = ct.try_into().unwrap(); // guaranteed exact chunks 16
+                    let dec = decrypt_block(ct_block, round_keys);
+                    pt.copy_from_slice(&dec);
+                });
+        }
+    } else {
+        // parallel feature not enabled or input len below threshold
+        // decrypt serially
+        for (ct, pt) in ciphertext
+            .chunks_exact(16)
+            .zip(plaintext.chunks_exact_mut(16))
+        {
+            let ct_block: &[u8; 16] = ct.try_into().unwrap(); // safe unwrap, loop guarantees exact chunks 16
+            let dec = decrypt_block(ct_block, round_keys);
+            pt.copy_from_slice(&dec);
+        }
     }
 
-    // unpad plaintext
-    let pad_len: usize = match plaintext.last() {
-        Some(v) => *v as usize,
-        None => 0,
-    };
-    plaintext.truncate(plaintext.len() - pad_len);
+    unpad(&mut plaintext)?;
 
     Ok(plaintext)
 }
 
-
 #[cfg(test)]
-mod test_ecb_serial {
+mod test_ecb {
     use super::*;
     use crate::aesp::cipher::Cipher;
     use crate::aesp::key::Key;
-    use crate::aesp::modes::util::test_util::{hex_to_bytes, PLAINTEXT, KEY_128, KEY_192, KEY_256};
+    use crate::aesp::modes::util::test_util::{KEY_128, KEY_192, KEY_256, PLAINTEXT, hex_to_bytes};
 
     #[test]
     fn aes_ecb_128_encrypt() -> Result<()> {
@@ -85,7 +121,7 @@ mod test_ecb_serial {
 
         let key = Key::try_from_slice(&KEY_128)?;
         let cipher = Cipher::new(&key);
-        let encrypted = ecb_core_enc_serial(&PLAINTEXT, cipher.get_round_keys())?;
+        let encrypted = ecb_core_enc(&PLAINTEXT, cipher.get_round_keys())?;
 
         assert_eq!(
             expected, encrypted,
@@ -107,7 +143,7 @@ mod test_ecb_serial {
 
         let key = Key::try_from_slice(&KEY_128)?;
         let cipher = Cipher::new(&key);
-        let decrypted = ecb_core_dec_serial(&ciphertext, cipher.get_round_keys())?;
+        let decrypted = ecb_core_dec(&ciphertext, cipher.get_round_keys())?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -130,7 +166,7 @@ mod test_ecb_serial {
 
         let key = Key::try_from_slice(&KEY_192)?;
         let cipher = Cipher::new(&key);
-        let encrypted = ecb_core_enc_serial(&PLAINTEXT, cipher.get_round_keys())?;
+        let encrypted = ecb_core_enc(&PLAINTEXT, cipher.get_round_keys())?;
 
         assert_eq!(
             expected, encrypted,
@@ -152,7 +188,7 @@ mod test_ecb_serial {
 
         let key = Key::try_from_slice(&KEY_192)?;
         let cipher = Cipher::new(&key);
-        let decrypted = ecb_core_dec_serial(&ciphertext, cipher.get_round_keys())?;
+        let decrypted = ecb_core_dec(&ciphertext, cipher.get_round_keys())?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -175,7 +211,7 @@ mod test_ecb_serial {
 
         let key = Key::try_from_slice(&KEY_256)?;
         let cipher = Cipher::new(&key);
-        let encrypted = ecb_core_enc_serial(&PLAINTEXT, cipher.get_round_keys())?;
+        let encrypted = ecb_core_enc(&PLAINTEXT, cipher.get_round_keys())?;
 
         assert_eq!(
             expected, encrypted,
@@ -197,7 +233,7 @@ mod test_ecb_serial {
 
         let key = Key::try_from_slice(&KEY_256)?;
         let cipher = Cipher::new(&key);
-        let decrypted = ecb_core_dec_serial(&ciphertext, cipher.get_round_keys())?;
+        let decrypted = ecb_core_dec(&ciphertext, cipher.get_round_keys())?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),

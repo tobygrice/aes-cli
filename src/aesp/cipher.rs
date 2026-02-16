@@ -29,12 +29,12 @@ impl Cipher {
     /// Encrypts each 16-byte block entirely independently
     /// and chains them together. **Vulnerable to pattern emergence in the ciphertext.**
     pub fn encrypt_ecb(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        ecb_core_enc_serial(plaintext, &self.round_keys)
+        ecb_core_enc(plaintext, &self.round_keys)
     }
 
     /// **Electronic codebook** decryption.
     pub fn decrypt_ecb(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
-        ecb_core_dec_serial(ciphertext, &self.round_keys)
+        ecb_core_dec(ciphertext, &self.round_keys)
     }
 
     /// **Counter mode** encryption.
@@ -54,7 +54,7 @@ impl Cipher {
         // generate IV and prepend to ciphertext
         let iv = random_iv()?;
         let mut ciphertext: Vec<u8> = iv.to_vec();
-        ciphertext.append(&mut ctr_core_parallel(plaintext, &self.round_keys, &iv, 0)?);
+        ciphertext.append(&mut ctr_core(plaintext, &self.round_keys, &iv, 0)?);
         Ok(ciphertext)
     }
 
@@ -74,7 +74,7 @@ impl Cipher {
         let mut iv = [0u8; 12];
         iv.copy_from_slice(iv_bytes);
 
-        ctr_core_parallel(ciphertext, &self.round_keys, &iv, 0)
+        ctr_core(ciphertext, &self.round_keys, &iv, 0)
     }
 
     /// **Galois/counter mode** encryption.
@@ -96,7 +96,7 @@ impl Cipher {
         out.extend_from_slice(aad_bytes);
 
         // compute ciphertext and tag
-        let mut ct = ctr_core_serial(plaintext, &self.round_keys, &iv, 2)?;
+        let mut ct = ctr_core(plaintext, &self.round_keys, &iv, 2)?;
         let tag = compute_tag(&ct, &self.round_keys, &iv, aad_bytes)?;
 
         out.append(&mut ct);
@@ -157,7 +157,7 @@ impl Cipher {
         let aad = if !aad.is_empty() { Some(aad) } else { None };
 
         // run ctr starting at 2, as per NIST spec
-        let plaintext = ctr_core_serial(ct, &self.round_keys, &iv, 2)?;
+        let plaintext = ctr_core(ct, &self.round_keys, &iv, 2)?;
         Ok((plaintext, aad))
     }
 

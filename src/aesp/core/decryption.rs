@@ -36,23 +36,33 @@ pub(crate) fn sub_bytes_inv(state: &mut [u8; 16]) {
 /// The first row shifts right by one position. 
 /// The second row shifts right by two positions.
 /// The third row shifts right by three positions.
-/// [
-///     01 02 03 04   ---->   01 02 03 04
-///     06 07 08 05   ---->   05 06 07 08
-///     11 12 09 10   ---->   09 10 11 12
-///     16 13 14 15   ---->   13 14 15 16
-/// ]
 #[inline(always)]
 fn shift_rows_inv(state: &mut [u8; 16]) {
-    // state is stored as columns: [c1, c1, c1, c1, c2, ... c2, c3, ... c3, ...]
-    // for row,col of updated state, new value is at ((col + 4 - row) & 3) * 4 + row
     let s = *state;
-    for row in 0..4 {
-        for col in 0..4 {
-            let new_val = ((col + 4 - row) & 3) * 4 + row;
-            state[col * 4 + row] = s[new_val];
-        }
-    }
+
+    // row 0 (indices 0,4,8,12): unchanged
+    state[0]  = s[0];
+    state[4]  = s[4];
+    state[8]  = s[8];
+    state[12] = s[12];
+
+    // row 1 (1,5,9,13): right rotate by 1
+    state[1]  = s[13];
+    state[5]  = s[1];
+    state[9]  = s[5];
+    state[13] = s[9];
+
+    // row 2 (2,6,10,14): right rotate by 2
+    state[2]  = s[10];
+    state[6]  = s[14];
+    state[10] = s[2];
+    state[14] = s[6];
+
+    // row 3 (3,7,11,15): right rotate by 3
+    state[3]  = s[7];
+    state[7]  = s[11];
+    state[11] = s[15];
+    state[15] = s[3];
 }
 
 /// Inverse MixColumns step. Each column is multiplied by a constant matrix using Galois field multiplication.
