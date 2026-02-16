@@ -1,4 +1,3 @@
-#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 use crate::aesp::core::{decrypt_block, encrypt_block};
@@ -7,8 +6,6 @@ use crate::aesp::modes::util::{PARALLEL_THRESHOLD, unpad};
 
 /// Core ECB encryption algorithm. Encrypts plaintext in 16-byte blocks to form ciphertext. Uses PKCS#7 padding.
 pub fn ecb_core_enc(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
-    let parallel = cfg!(feature = "parallel") && plaintext.len() > PARALLEL_THRESHOLD;
-
     // last block needs to be PKCS#7 padded. Variables to track where to start padding:
     let rem_len = plaintext.len() % 16; // number of leftover bytes after chunking into 16
     let pad_len = 16 - rem_len; // number of bytes to be padded
@@ -17,19 +14,16 @@ pub fn ecb_core_enc(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>
     let mut ciphertext = vec![0u8; plaintext.len() + pad_len];
 
     // encrypt in parallel if feature enabled and size exceeds threshold
-    if parallel {
-        #[cfg(feature = "parallel")]
-        {
-            // encrypt plaintext in 16-byte blocks (parallel bulk, excluding final padded block)
-            ciphertext[..chunks_len]
-                .par_chunks_exact_mut(16)
-                .zip(plaintext[..chunks_len].par_chunks_exact(16))
-                .for_each(|(ct, pt)| {
-                    let pt_block: &[u8; 16] = pt.try_into().unwrap(); // guaranteed exact chunks 16
-                    let enc = encrypt_block(pt_block, round_keys);
-                    ct.copy_from_slice(&enc);
-                });
-        }
+    if plaintext.len() > PARALLEL_THRESHOLD {
+        // encrypt plaintext in 16-byte blocks (parallel bulk, excluding final padded block)
+        ciphertext[..chunks_len]
+            .par_chunks_exact_mut(16)
+            .zip(plaintext[..chunks_len].par_chunks_exact(16))
+            .for_each(|(ct, pt)| {
+                let pt_block: &[u8; 16] = pt.try_into().unwrap(); // guaranteed exact chunks 16
+                let enc = encrypt_block(pt_block, round_keys);
+                ct.copy_from_slice(&enc);
+            });
     } else {
         // parallel feature not enabled or input len below threshold
         // encrypt serially
@@ -57,8 +51,6 @@ pub fn ecb_core_enc(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>
 
 /// Core ECB decryption algorithm. Decrypts ciphertext in 16-byte blocks to form plaintext. Assumes ciphertext was PKCS#7 padded.
 pub fn ecb_core_dec(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
-    let parallel = cfg!(feature = "parallel") && ciphertext.len() > PARALLEL_THRESHOLD;
-
     // ECB ciphertext should (and must) always be a multiple of 16 bytes.
     if ciphertext.len() % 16 != 0 {
         return Err(Error::InvalidCiphertext {
@@ -70,9 +62,7 @@ pub fn ecb_core_dec(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8
     let mut plaintext = vec![0u8; ciphertext.len()];
 
     // decrypt in parallel if feature enabled and size exceeds threshold
-    if parallel {
-        #[cfg(feature = "parallel")]
-        {
+    if ciphertext.len() > PARALLEL_THRESHOLD {
             // decrypt ciphertext in 16-byte blocks
             ciphertext
                 .par_chunks_exact(16)
@@ -82,7 +72,6 @@ pub fn ecb_core_dec(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8
                     let dec = decrypt_block(ct_block, round_keys);
                     pt.copy_from_slice(&dec);
                 });
-        }
     } else {
         // parallel feature not enabled or input len below threshold
         // decrypt serially

@@ -5,12 +5,8 @@ authors = ["Toby Grice"]
 description = "AES encryption/decryption tool | Toby Grice"
 edition = "2024"
 
-
 [dependencies]
 clap = { version = "4.5.56", features = ["derive"] }
 rand = "0.9.2"
-rayon = { version = "1.11.0", optional = true }
+rayon = "1.11.0"
 thiserror = "2.0.18"
-
-[features]
-parallel = ["dep:rayon"]

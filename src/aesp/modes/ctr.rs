@@ -1,4 +1,3 @@
-#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 use crate::aesp::core::encrypt_block;
@@ -20,30 +19,27 @@ pub fn ctr_core(
         .ok_or(Error::CounterOverflow)?;
 
     // encrypt in parallel if feature enabled and size exceeds threshold
-    #[cfg(feature = "parallel")]
-    {      
-        if input.len() > crate::aesp::modes::util::PARALLEL_THRESHOLD {
-            let mut output = vec![0u8; input.len()];
-            output
-                .par_chunks_mut(16)
-                .zip(input.par_chunks(16))
-                .enumerate()
-                .for_each(|(i, (out_chunk, in_chunk))| {
-                    let ctr = ctr_start.wrapping_add(i as u32); // safe due to pre-check
-                    let block = ctr_block(iv, ctr);
-                    let keystream = encrypt_block(&block, round_keys);
+    if input.len() > crate::aesp::modes::util::PARALLEL_THRESHOLD {
+        let mut output = vec![0u8; input.len()];
+        output
+            .par_chunks_mut(16)
+            .zip(input.par_chunks(16))
+            .enumerate()
+            .for_each(|(i, (out_chunk, in_chunk))| {
+                let ctr = ctr_start.wrapping_add(i as u32); // safe due to pre-check
+                let block = ctr_block(iv, ctr);
+                let keystream = encrypt_block(&block, round_keys);
 
-                    // XOR only actual bytes (last chunk may be < 16)
-                    for j in 0..in_chunk.len() {
-                        out_chunk[j] = keystream[j] ^ in_chunk[j];
-                    }
-                });
+                // XOR only actual bytes (last chunk may be < 16)
+                for j in 0..in_chunk.len() {
+                    out_chunk[j] = keystream[j] ^ in_chunk[j];
+                }
+            });
 
-            return Ok(output);
-        }
+        return Ok(output);
     }
-
-    // parallel feature not enabled or input len below threshold
+    
+    // input len below threshold
     // encrypt serially
 
     // initialise ctr and output vector
