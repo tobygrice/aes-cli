@@ -35,7 +35,7 @@ pub(crate) fn xor_words(a: &[u8; 4], b: &[u8; 4]) -> [u8; 4] {
     [a[0] ^ b[0], a[1] ^ b[1], a[2] ^ b[2], a[3] ^ b[3]]
 }
 
-// written by an LLM!
+// gf_mul written with LLM assistance
 #[inline(always)]
 pub(crate) fn gf_mul(tag: [u8; 16], h: [u8; 16]) -> [u8; 16] {
     const R: u128 = 0xE100_0000_0000_0000_0000_0000_0000_0000;

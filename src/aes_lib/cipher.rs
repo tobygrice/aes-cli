@@ -116,6 +116,7 @@ impl Cipher {
     /// - `(plaintext, AAD)` if tag was authenticated and decryption was successful.
     /// - [AuthFailed](crate::Error::AuthFailed) error if computed tag did not match input tag.
     /// - [CounterOverflow](crate::Error::CounterOverflow) error if more than 2^32 blocks were provided.
+    /// - [InvalidCiphertext](crate::Error::InvalidCiphertext) error if ciphertext does not match expected format.
     pub fn decrypt_gcm(&self, ciphertext: &[u8]) -> Result<(Vec<u8>, Option<Vec<u8>>)> {
         // minimum size is 32 bytes -> 12 (iv) + 4 (aad_len) + 16 (tag)
         if ciphertext.len() < 32 {
@@ -164,7 +165,8 @@ impl Cipher {
     }
 
     /// AES key schedule. Returns a vector of 11, 13, or 15 round keys, corresponding with AES-128, AES-192,
-    /// and AES-256, respectively
+    /// and AES-256, respectively. The extra round key is the initial round key, which is not counted in most 
+    /// documentation as it is simply the original key.
     fn expand_key(key: &Key) -> Vec<[u8; 16]> {
         let key = key.as_bytes();
 

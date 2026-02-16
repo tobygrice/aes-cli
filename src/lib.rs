@@ -1,7 +1,7 @@
 //! This crate provides an intuitive interface for AES-128, AES-192, and AES-256 encryption and decryption.
 //! The following modes of operation are supported:
 //! - **Galois/counter mode** ([GCM](crate::Cipher::encrypt_gcm)), with optional additional authenticated data (AAD). 
-//! Encrypts using CTR mode and generates an authentication tag from the AAD + plaintext. This tag is recomputed at decryption 
+//! Encrypts using CTR mode and generates an authentication tag from the AAD + ciphertext. This tag is recomputed at decryption 
 //! and compared with the received tag.
 //! - **Counter mode** ([CTR](crate::Cipher::encrypt_ctr)). A 16-byte counter is repeatedly incremented and encrypted. 
 //! The result is `XOR`'d with the plaintext to produce the ciphertext. 

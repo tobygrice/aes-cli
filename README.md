@@ -1,19 +1,21 @@
 # AES in Rust
 ## About
-Library features:
+Library roadmap:
 - [x] AES encryption and decryption in ECB mode with PKCS#7 padding
 - [x] Robust library error handling using `thiserror` crate
 - [x] Counter mode of operation (CTR)
 - [x] Galois/counter mode (GCM) for message authentication
 - [x] GCM with AAD
 - [x] Major library API overhaul
+- [ ] Encryption and decryption in parallel
+- [x] In-code library documentation for crates.io
+- [ ] Publish to crates.io
 
-CLI features:
+CLI roadmap:
 - [x] CLI using clap, supporting random key generation for encryption
 - [x] Specify mode of operation
 - [x] Accept AAD for GCM and print AAD to stdout when decrypting
 - [ ] Read, encrypt, write in fixed-size buffer blocks (don't load massive files into RAM)
-- [ ] Encryption and decryption in parallel
 
 ## CLI Usage
 ```
