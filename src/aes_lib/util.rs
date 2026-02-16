@@ -1,7 +1,7 @@
 use rand::TryRngCore;
 use rand::rngs::OsRng;
 
-use super::error::Result;
+use crate::aes_lib::error::Result;
 
 pub(crate) fn random_iv() -> Result<[u8; 12]> {
     let mut iv = [0u8; 12];

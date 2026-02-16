@@ -1,21 +1,22 @@
-use super::error::*;
-use super::util::{ctr_block, gf_mul, xor_chunks};
-use crate::aes_lib::core::decrypt_block;
-use crate::aes_lib::core::encrypt_block;
+use crate::aes_lib::core::{decrypt_block, encrypt_block};
+use crate::aes_lib::error::*;
+use crate::aes_lib::util::{ctr_block, gf_mul, xor_chunks};
 
+/// Core ECB encryption algorithm. Encrypts plaintext in 16-byte blocks to form ciphertext. Uses PKCS#7 padding.
 pub(crate) fn encrypt_ecb_core(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
-    // last block needs to be PKCS#7 padded
+    // last block needs to be PKCS#7 padded. Variables to track when to start padding:
     let rem_len = plaintext.len() % 16; // number of leftover bytes after chunking into 16
     let pad_len = 16 - rem_len; // number of bytes to be padded
     let chunks_len = plaintext.len() - rem_len; // number of bytes that can fit into 16-byte chunks
 
     let mut ciphertext = vec![0u8; plaintext.len() + pad_len];
 
+    // encrypt plaintext in 16-byte blocks
     for (pt, ct) in plaintext[..chunks_len]
         .chunks_exact(16)
         .zip(ciphertext[..chunks_len].chunks_exact_mut(16))
     {
-        let pt_block: &[u8; 16] = pt.try_into().unwrap();
+        let pt_block: &[u8; 16] = pt.try_into().unwrap(); // safe unwrap, loop guarantees exact chunks 16
         let enc = encrypt_block(pt_block, round_keys);
         ct.copy_from_slice(&enc);
     }
@@ -32,7 +33,9 @@ pub(crate) fn encrypt_ecb_core(plaintext: &[u8], round_keys: &[[u8; 16]]) -> Res
     Ok(ciphertext)
 }
 
+/// Core ECB decryption algorithm. Decrypts plaintext in 16-byte blocks to form plaintext. Assumes plaintext was PKCS#7 padded.
 pub(crate) fn decrypt_ecb_core(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Result<Vec<u8>> {
+    // ECB ciphertext should (and must) always be a multiple of 16 bytes.
     if ciphertext.len() % 16 != 0 {
         return Err(Error::InvalidCiphertext {
             len: ciphertext.len(),
@@ -41,11 +44,13 @@ pub(crate) fn decrypt_ecb_core(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Re
     }
 
     let mut plaintext = vec![0u8; ciphertext.len()];
+
+    // decrypt ciphertext in 16-byte blocks
     for (ct, pt) in ciphertext
         .chunks_exact(16)
         .zip(plaintext.chunks_exact_mut(16))
     {
-        let ct_block: &[u8; 16] = ct.try_into().unwrap();
+        let ct_block: &[u8; 16] = ct.try_into().unwrap(); // safe unwrap, loop guarantees exact chunks 16
         let dec = decrypt_block(ct_block, round_keys);
         pt.copy_from_slice(&dec);
     }
@@ -60,6 +65,7 @@ pub(crate) fn decrypt_ecb_core(ciphertext: &[u8], round_keys: &[[u8; 16]]) -> Re
     Ok(plaintext)
 }
 
+/// Core counter encryption and decryption algorithm (CTR is symettric)
 pub(crate) fn ctr_core(
     input: &[u8],
     round_keys: &[[u8; 16]],
@@ -67,15 +73,16 @@ pub(crate) fn ctr_core(
     ctr_start: u32,
 ) -> Result<Vec<u8>> {
     let mut output = Vec::with_capacity(input.len());
-    let mut ctr = ctr_start; // mostly used for testing, in practice always start at 0
+    let mut ctr = ctr_start;
 
+    // for each chunk of input...
     for chunk in input.chunks(16) {
         let block = ctr_block(iv, ctr); // form block from iv + ctr
-        // encrypt block
-        // xor each element of chunk (1-16 bytes) with corresponding elem in keystream
+        // xor each element of input chunk (1-16 bytes) with encrypted ctr block
         let keystream = encrypt_block(&block, round_keys);
         let ct = xor_chunks(&keystream, chunk);
         output.extend_from_slice(&ct[..chunk.len()]);
+        // increment ctr and throw error if overflow
         ctr = match ctr.checked_add(1) {
             Some(c) => c,
             None => return Err(Error::CounterOverflow),
@@ -89,7 +96,7 @@ pub(crate) fn ctr_core(
 https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf
 diagram on page 5
 
-H = 128 0s encrypted with key
+H = block of 0s encrypted with key
 start with accumulator s = 0
 for each 16-byte block b:
     s = (s ^ b) * H (GF128 multiplication)
@@ -97,13 +104,14 @@ for each 16-byte block b:
 where blocks are:
     - all AAD blocks (padded)
     - all ciphertext blocks (padded)
-    - one block containing aad.len + ct.len
+    - one block comprised aad.len || ct.len
 
 final tag = s ^ encrypt_block(J0, key)
 
 where J0 is:
     - IV || 1u32 (initial ctr block for ctr = 1)
 */
+/// Function to compute GCM cryptographic tag from ciphertext + AAD
 pub(crate) fn compute_tag(
     ciphertext: &[u8],
     round_keys: &[[u8; 16]],
@@ -130,12 +138,12 @@ pub(crate) fn compute_tag(
         s = gf_mul(xor_chunks(&s, ct_chunk), h);
     }
 
-    // authenticate message length, build aad_bits || ct_bits
-    let aad_bits = (aad.len() as u64) * 8;
-    let ct_bits = (ciphertext.len() as u64) * 8;
+    // authenticate message length, build aad_size || ct_size
+    let aad_size = (aad.len() as u64) * 8; // size in bits
+    let ct_size = (ciphertext.len() as u64) * 8; // size in bits
     let mut len = [0u8; 16];
-    len[..8].copy_from_slice(&aad_bits.to_be_bytes());
-    len[8..].copy_from_slice(&ct_bits.to_be_bytes());
+    len[..8].copy_from_slice(&aad_size.to_be_bytes());
+    len[8..].copy_from_slice(&ct_size.to_be_bytes());
 
     s = gf_mul(xor_chunks(&s, &len), h);
 
@@ -146,7 +154,8 @@ pub(crate) fn compute_tag(
 #[cfg(test)]
 mod test_ecb_ctr {
     use super::*;
-    use crate::aes_lib::key::{Key, expand_key};
+    use crate::aes_lib::cipher::Cipher;
+    use crate::aes_lib::key::Key;
 
     // all test vectors from
     // https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
@@ -196,8 +205,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_128)?;
-        let round_keys = expand_key(&key);
-        let encrypted = ctr_core(&PLAINTEXT, &round_keys, &CTR_IV, CTR_START)?;
+        let cipher = Cipher::new(&key);
+        let encrypted = ctr_core(&PLAINTEXT, cipher.get_round_keys(), &CTR_IV, CTR_START)?;
 
         assert_eq!(
             expected, encrypted,
@@ -217,8 +226,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_128)?;
-        let round_keys = expand_key(&key);
-        let decrypted = ctr_core(&ciphertext, &round_keys, &CTR_IV, CTR_START)?;
+        let cipher = Cipher::new(&key);
+        let decrypted = ctr_core(&ciphertext, cipher.get_round_keys(), &CTR_IV, CTR_START)?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -239,8 +248,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_192)?;
-        let round_keys = expand_key(&key);
-        let encrypted = ctr_core(&PLAINTEXT, &round_keys, &CTR_IV, CTR_START)?;
+        let cipher = Cipher::new(&key);
+        let encrypted = ctr_core(&PLAINTEXT, cipher.get_round_keys(), &CTR_IV, CTR_START)?;
 
         assert_eq!(
             expected, encrypted,
@@ -260,8 +269,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_192)?;
-        let round_keys = expand_key(&key);
-        let decrypted = ctr_core(&ciphertext, &round_keys, &CTR_IV, CTR_START)?;
+        let cipher = Cipher::new(&key);
+        let decrypted = ctr_core(&ciphertext, cipher.get_round_keys(), &CTR_IV, CTR_START)?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -282,8 +291,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_256)?;
-        let round_keys = expand_key(&key);
-        let encrypted = ctr_core(&PLAINTEXT, &round_keys, &CTR_IV, CTR_START)?;
+        let cipher = Cipher::new(&key);
+        let encrypted = ctr_core(&PLAINTEXT, cipher.get_round_keys(), &CTR_IV, CTR_START)?;
 
         assert_eq!(
             expected, encrypted,
@@ -303,8 +312,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_256)?;
-        let round_keys = expand_key(&key);
-        let decrypted = ctr_core(&ciphertext, &round_keys, &CTR_IV, CTR_START)?;
+        let cipher = Cipher::new(&key);
+        let decrypted = ctr_core(&ciphertext, cipher.get_round_keys(), &CTR_IV, CTR_START)?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -326,8 +335,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_128)?;
-        let round_keys = expand_key(&key);
-        let encrypted = encrypt_ecb_core(&PLAINTEXT, &round_keys)?;
+        let cipher = Cipher::new(&key);
+        let encrypted = encrypt_ecb_core(&PLAINTEXT, cipher.get_round_keys())?;
 
         assert_eq!(
             expected, encrypted,
@@ -348,8 +357,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_128)?;
-        let round_keys = expand_key(&key);
-        let decrypted = decrypt_ecb_core(&ciphertext, &round_keys)?;
+        let cipher = Cipher::new(&key);
+        let decrypted = decrypt_ecb_core(&ciphertext, cipher.get_round_keys())?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -371,8 +380,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_192)?;
-        let round_keys = expand_key(&key);
-        let encrypted = encrypt_ecb_core(&PLAINTEXT, &round_keys)?;
+        let cipher = Cipher::new(&key);
+        let encrypted = encrypt_ecb_core(&PLAINTEXT, cipher.get_round_keys())?;
 
         assert_eq!(
             expected, encrypted,
@@ -393,8 +402,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_192)?;
-        let round_keys = expand_key(&key);
-        let decrypted = decrypt_ecb_core(&ciphertext, &round_keys)?;
+        let cipher = Cipher::new(&key);
+        let decrypted = decrypt_ecb_core(&ciphertext, cipher.get_round_keys())?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -416,8 +425,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_256)?;
-        let round_keys = expand_key(&key);
-        let encrypted = encrypt_ecb_core(&PLAINTEXT, &round_keys)?;
+        let cipher = Cipher::new(&key);
+        let encrypted = encrypt_ecb_core(&PLAINTEXT, cipher.get_round_keys())?;
 
         assert_eq!(
             expected, encrypted,
@@ -438,8 +447,8 @@ mod test_ecb_ctr {
         );
 
         let key = Key::try_from_slice(&KEY_256)?;
-        let round_keys = expand_key(&key);
-        let decrypted = decrypt_ecb_core(&ciphertext, &round_keys)?;
+        let cipher = Cipher::new(&key);
+        let decrypted = decrypt_ecb_core(&ciphertext, cipher.get_round_keys())?;
 
         assert_eq!(
             PLAINTEXT.to_vec(),
@@ -462,9 +471,10 @@ mod test_ecb_ctr {
 // gcm tests written with LLM assistance
 #[cfg(test)]
 mod test_gcm {
-    use super::*;
     use super::test_ecb_ctr::hex_to_bytes;
-    use crate::aes_lib::key::{Key, expand_key};
+    use super::*;
+    use crate::aes_lib::cipher::Cipher;
+    use crate::aes_lib::key::Key;
 
     // all test vectors from
     // https://boringssl.googlesource.com/boringssl.git/%2B/734fca08902889c88e84839134262bdf5c12eebf/crypto/cipher/cipher_test.txt
@@ -483,8 +493,8 @@ mod test_gcm {
         let ciphertext: [u8; 0] = [];
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let tag = compute_tag(&ciphertext, &round_keys, &iv, &aad).unwrap();
+        let cipher = Cipher::new(&key);
+        let tag = compute_tag(&ciphertext, cipher.get_round_keys(), &iv, &aad).unwrap();
         assert_eq!(tag, hex_to_arr_16("58e2fccefa7e3061367f1d57a4e7455a"));
 
         Ok(())
@@ -505,8 +515,8 @@ mod test_gcm {
         let ciphertext = hex_to_bytes("0388dace60b6a392f328c2b971b2fe78");
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let tag = compute_tag(&ciphertext, &round_keys, &iv, &aad).unwrap();
+        let cipher = Cipher::new(&key);
+        let tag = compute_tag(&ciphertext, cipher.get_round_keys(), &iv, &aad).unwrap();
         assert_eq!(tag, hex_to_arr_16("ab6e47d42cec13bdf53a67b21257bddf"));
 
         Ok(())
@@ -531,8 +541,8 @@ mod test_gcm {
         );
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let tag = compute_tag(&ciphertext, &round_keys, &iv, &aad).unwrap();
+        let cipher = Cipher::new(&key);
+        let tag = compute_tag(&ciphertext, cipher.get_round_keys(), &iv, &aad).unwrap();
         assert_eq!(tag, hex_to_arr_16("4d5c2af327cd64a62cf35abd2ba6fab4"));
 
         Ok(())
@@ -557,8 +567,8 @@ mod test_gcm {
         );
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let tag = compute_tag(&ciphertext, &round_keys, &iv, &aad).unwrap();
+        let cipher = Cipher::new(&key);
+        let tag = compute_tag(&ciphertext, cipher.get_round_keys(), &iv, &aad).unwrap();
         assert_eq!(tag, hex_to_arr_16("5bc94fbc3221a5db94fae95ae7121a47"));
 
         Ok(())

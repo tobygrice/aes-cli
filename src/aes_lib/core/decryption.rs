@@ -1,7 +1,7 @@
 use super::constants::SBOX_INV;
 use super::core_util::{dbl, add_round_key};
 
-// refactor to-do: flatten input/outputs to [u8; 16]
+/// Core AES decryption function. Decrypts 16 byte block using provided round keys.
 #[inline(always)]
 pub fn decrypt_block(ciphertext: &[u8; 16], round_keys: &[[u8; 16]]) -> [u8; 16] {
     let mut state = *ciphertext;
@@ -23,6 +23,7 @@ pub fn decrypt_block(ciphertext: &[u8; 16], round_keys: &[[u8; 16]]) -> [u8; 16]
     state
 }
 
+/// Inverse SubBytes step. Each byte is substituted using the inverse SBOX.
 #[inline(always)]
 pub(crate) fn sub_bytes_inv(state: &mut [u8; 16]) {
     for byte in state {
@@ -30,39 +31,56 @@ pub(crate) fn sub_bytes_inv(state: &mut [u8; 16]) {
     }
 }
 
-
+/// Inverse ShiftRows step. 
+/// The 0th row does not change. 
+/// The first row shifts right by one position. 
+/// The second row shifts right by two positions.
+/// The third row shifts right by three positions.
+/// [
+///     01 02 03 04   ---->   01 02 03 04
+///     06 07 08 05   ---->   05 06 07 08
+///     11 12 09 10   ---->   09 10 11 12
+///     16 13 14 15   ---->   13 14 15 16
+/// ]
 #[inline(always)]
 fn shift_rows_inv(state: &mut [u8; 16]) {
+    // state is stored as columns: [c1, c1, c1, c1, c2, ... c2, c3, ... c3, ...]
+    // for row,col of updated state, new value is at ((col + 4 - row) & 3) * 4 + row
     let s = *state;
     for row in 0..4 {
         for col in 0..4 {
-            let old_idx = ((col + 4 - row) & 3) * 4 + row;
-            state[col * 4 + row] = s[old_idx];
+            let new_val = ((col + 4 - row) & 3) * 4 + row;
+            state[col * 4 + row] = s[new_val];
         }
     }
 }
 
-// optimisation by https://crypto.stackexchange.com/a/71206
+/// Inverse MixColumns step. Each column is multiplied by a constant matrix using Galois field multiplication.
+/// [ b0 ]      [ 14  11  13  09 ]  [ d0 ]
+/// | b1 |  =   | 09  14  11  13 |  | d1 |
+/// | b2 |      | 13  09  14  11 |  | d2 |
+/// [ b3 ]      [ 11  13  09  14 ]  [ d3 ]
 #[inline(always)]
 fn mix_columns_inv(state: &mut [u8; 16]) {
+    // optimisation technique from https://crypto.stackexchange.com/a/71206
     for col in 0..4 {
         let i = col * 4;
         let (a, b, c, d) = (state[i], state[i + 1], state[i + 2], state[i + 3]);
-        let x = dbl(a ^ b ^ c ^ d);
-        let y = dbl(x ^ a ^ c);
-        let z = dbl(x ^ b ^ d);
-        state[i + 0] = dbl(y ^ a ^ b) ^ b ^ c ^ d; /* 14a + 11b + 13c + 9d */
-        state[i + 1] = dbl(z ^ b ^ c) ^ c ^ d ^ a; /* 14b + 11c + 13d + 9a */
-        state[i + 2] = dbl(y ^ c ^ d) ^ d ^ a ^ b; /* 14c + 11d + 13a + 9b */
-        state[i + 3] = dbl(z ^ d ^ a) ^ a ^ b ^ c; /* 14d + 11a + 13b + 9c */
+        let x = dbl(a ^ b ^ c ^ d); /* 2a + 2b + 2c + 2d */
+        let y = dbl(x ^ a ^ c); /* 6a + 4b + 6c + 4d */
+        let z = dbl(x ^ b ^ d); /* 4a + 6b + 4c + 6d */
+        state[i + 0] = dbl(y ^ a ^ b) ^ b ^ c ^ d; /* 14a + 11b + 13c + 09d */
+        state[i + 1] = dbl(z ^ b ^ c) ^ c ^ d ^ a; /* 09a + 14b + 11c + 13d */
+        state[i + 2] = dbl(y ^ c ^ d) ^ d ^ a ^ b; /* 13a + 09b + 14c + 11d */
+        state[i + 3] = dbl(z ^ d ^ a) ^ a ^ b ^ c; /* 11a + 13b + 09c + 14d */
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::aes_lib::Key;
+    use crate::aes_lib::cipher::Cipher;
+    use crate::aes_lib::key::Key;
     use crate::aes_lib::error::Result;
-    use crate::aes_lib::key::expand_key;
     use crate::aes_lib::core::{decryption, encryption};
 
     #[test]
@@ -155,9 +173,9 @@ mod tests {
         ];
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let encrypted = encryption::encrypt_block(&plaintext, &round_keys);
-        let decrypted = decryption::decrypt_block(&encrypted, &round_keys);
+        let cipher = Cipher::new(&key);
+        let encrypted = encryption::encrypt_block(&plaintext, cipher.get_round_keys());
+        let decrypted = decryption::decrypt_block(&encrypted, cipher.get_round_keys());
 
         assert_eq!(
             decrypted, plaintext,

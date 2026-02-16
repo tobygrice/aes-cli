@@ -1,27 +1,32 @@
 use super::constants::SBOX;
 use super::core_util::{add_round_key, dbl};
 
+/// Core AES encryption function. Encrypts 16 byte block using provided round keys.
 #[inline(always)]
 pub fn encrypt_block(plaintext: &[u8; 16], round_keys: &[[u8; 16]]) -> [u8; 16] {
     let mut state = *plaintext;
-    let num_rounds = round_keys.len();
+    let last_key_idx = round_keys.len() - 1;
 
+    // add first round key to state
     add_round_key(&mut state, &round_keys[0]);
 
-    for round_key in &round_keys[1..num_rounds - 1] {
+    // perform all rounds except for the last
+    for round_key in &round_keys[1..last_key_idx] {
         sub_bytes(&mut state);
         shift_rows(&mut state);
         mix_columns(&mut state);
         add_round_key(&mut state, round_key);
     }
 
+    // last round skips mixcolumns step
     sub_bytes(&mut state);
     shift_rows(&mut state);
-    add_round_key(&mut state, round_keys.last().unwrap());
+    add_round_key(&mut state, &round_keys[last_key_idx]);
 
     state
 }
 
+/// SubBytes step. Each byte is substituted using the SBOX.
 #[inline(always)]
 pub(crate) fn sub_bytes(state: &mut [u8; 16]) {
     for byte in state {
@@ -29,27 +34,45 @@ pub(crate) fn sub_bytes(state: &mut [u8; 16]) {
     }
 }
 
+/// ShiftRows step. 
+/// The 0th row does not change. 
+/// The first row shifts left by one position. 
+/// The second row shifts left by two positions.
+/// The third row shifts left by three positions.
+/// [
+///     01 02 03 04   ---->   01 02 03 04 
+///     05 06 07 08   ---->   06 07 08 05
+///     09 10 11 12   ---->   11 12 09 10
+///     13 14 15 16   ---->   16 13 14 15
+/// ]
 #[inline(always)]
 pub(crate) fn shift_rows(state: &mut [u8; 16]) {
+    // state is stored as columns: [c1, c1, c1, c1, c2, ... c2, c3, ... c3, ...]
+    // for row,col of updated state, new value is at ((col + row) & 3) * 4 + row
     let s = *state;
     for row in 0..4 {
         for col in 0..4 {
-            let old_idx = ((col + row) & 3) * 4 + row;
-            state[col * 4 + row] = s[old_idx];
+            let new_val = ((col + row) & 3) * 4 + row;
+            state[col * 4 + row] = s[new_val];
         }
     }
 }
 
-// optimisation by https://crypto.stackexchange.com/a/71206
+/// MixColumns step. Each column is multiplied by a constant matrix using Galois field multiplication.
+/// [ d0 ]      [ 2  3  1  1 ]  [ b0 ]
+/// | d1 |  =   | 1  2  3  1 |  | b1 |
+/// | d2 |      | 1  1  2  3 |  | b2 |
+/// [ d3 ]      [ 3  1  1  2 ]  [ b3 ]
 #[inline(always)]
 pub(crate) fn mix_columns(state: &mut [u8; 16]) {
+    // optimisation technique from https://crypto.stackexchange.com/a/71206
     for col in 0..4 {
         let i = col * 4;
         let (a, b, c, d) = (state[i], state[i + 1], state[i + 2], state[i + 3]);
-        state[i + 0] = dbl(a ^ b) ^ b ^ c ^ d; /* 2a + 3b + c + d */
-        state[i + 1] = dbl(b ^ c) ^ c ^ d ^ a; /* 2b + 3c + d + a */
-        state[i + 2] = dbl(c ^ d) ^ d ^ a ^ b; /* 2c + 3d + a + b */
-        state[i + 3] = dbl(d ^ a) ^ a ^ b ^ c; /* 2d + 3a + b + c */
+        state[i + 0] = dbl(a ^ b) ^ b ^ c ^ d; /* 2a + 3b + 1c + 1d */
+        state[i + 1] = dbl(b ^ c) ^ c ^ d ^ a; /* 1a + 2b + 3c + 1d */
+        state[i + 2] = dbl(c ^ d) ^ d ^ a ^ b; /* 1a + 1b + 2c + 3d */
+        state[i + 3] = dbl(d ^ a) ^ a ^ b ^ c; /* 3a + 1b + 1c + 2d */
     }
 }
 
@@ -57,9 +80,9 @@ pub(crate) fn mix_columns(state: &mut [u8; 16]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aes_lib::Key;
+    use crate::aes_lib::cipher::Cipher;
+    use crate::aes_lib::key::Key;
     use crate::aes_lib::error::Result;
-    use crate::aes_lib::key::expand_key;
 
     #[test]
     fn test_mix_columns() {
@@ -156,8 +179,8 @@ mod tests {
         ];
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let actual = encrypt_block(&plaintext, &round_keys);
+        let cipher = Cipher::new(&key);
+        let actual = encrypt_block(&plaintext, cipher.get_round_keys());
 
         assert_eq!(actual, expected, "incorrect AES-256 encryption of block");
         Ok(())
@@ -196,8 +219,8 @@ mod tests {
         ];
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let actual = encrypt_block(&plaintext, &round_keys);
+        let cipher = Cipher::new(&key);
+        let actual = encrypt_block(&plaintext, cipher.get_round_keys());
 
         assert_eq!(actual, expected, "incorrect AES-192 encryption of block");
         Ok(())
@@ -235,8 +258,8 @@ mod tests {
         ];
 
         let key = Key::try_from_slice(&key)?;
-        let round_keys = expand_key(&key);
-        let actual = encrypt_block(&plaintext, &round_keys);
+        let cipher = Cipher::new(&key);
+        let actual = encrypt_block(&plaintext, cipher.get_round_keys());
 
         assert_eq!(actual, expected, "incorrect AES-128 encryption of block");
         Ok(())
