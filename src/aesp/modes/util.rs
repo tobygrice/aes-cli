@@ -1,18 +1,16 @@
 use crate::aesp::error::*;
 
 pub const PARALLEL_THRESHOLD: usize = 4 * 1024; // encrypt in parallel if input size gt 4 KiB
+const GHASH_R: u128 = 0xE100_0000_0000_0000_0000_0000_0000_0000; // reduction constant for GHASH
 
 #[inline(always)]
 pub(crate) fn ctr_block(iv: &[u8; 12], ctr: u32) -> [u8; 16] {
     let cb = ctr.to_be_bytes();
     [
-        iv[00], iv[01], iv[02], iv[03],
-        iv[04], iv[05], iv[06], iv[07],
-        iv[08], iv[09], iv[10], iv[11],
-        cb[00], cb[01], cb[02], cb[03],
+        iv[00], iv[01], iv[02], iv[03], iv[04], iv[05], iv[06], iv[07], iv[08], iv[09], iv[10],
+        iv[11], cb[00], cb[01], cb[02], cb[03],
     ]
 }
-
 
 #[inline(always)]
 pub(crate) fn xor_chunks(y: &[u8; 16], chunk: &[u8]) -> [u8; 16] {
@@ -23,28 +21,23 @@ pub(crate) fn xor_chunks(y: &[u8; 16], chunk: &[u8]) -> [u8; 16] {
     out
 }
 
-// gf_mul written with LLM assistance
 #[inline(always)]
-pub(crate) fn gf_mul(tag: [u8; 16], h: [u8; 16]) -> [u8; 16] {
-    const R: u128 = 0xE100_0000_0000_0000_0000_0000_0000_0000;
+pub(crate) fn mul_x(v: u128) -> u128 {
+    // Multiply by x (in the GHASH field representation)
+    let lsb = v & 1;
+    let mut v2 = v >> 1;
+    v2 ^= GHASH_R & (0u128.wrapping_sub(lsb));
+    v2
+}
 
-    let x = u128::from_be_bytes(tag);
-    let mut v = u128::from_be_bytes(h);
-    let mut z: u128 = 0;
-
-    // Process x bits from MSB -> LSB
-    for i in 0..128 {
-        let bit = (x >> (127 - i)) & 1;
-        // If bit == 1, z ^= v (branchless)
-        z ^= v & (0u128.wrapping_sub(bit));
-
-        // v = v >> 1; if LSB was 1, v ^= R
-        let lsb = v & 1;
-        v >>= 1;
-        v ^= R & (0u128.wrapping_sub(lsb));
-    }
-
-    z.to_be_bytes()
+#[inline(always)]
+pub(crate) fn mul_x4(mut v: u128) -> u128 {
+    // Multiply by x^4 (4 successive mul_x)
+    v = mul_x(v);
+    v = mul_x(v);
+    v = mul_x(v);
+    v = mul_x(v);
+    v
 }
 
 #[inline(always)]
@@ -75,7 +68,6 @@ pub(crate) fn unpad(input: &mut Vec<u8>) -> Result<()> {
     input.truncate(start);
     Ok(())
 }
-
 
 #[cfg(test)]
 pub(crate) mod test_util {

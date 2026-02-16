@@ -1,6 +1,6 @@
 use crate::aesp::core::encrypt_block;
 use crate::aesp::error::*;
-use crate::aesp::modes::util::{ctr_block, gf_mul, xor_chunks};
+use crate::aesp::modes::util::{ctr_block, mul_x, mul_x4, xor_chunks};
 
 /*
 https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf
@@ -21,6 +21,7 @@ final tag = s ^ encrypt_block(J0, key)
 where J0 is:
     - IV || 1u32 (initial ctr block for ctr = 1)
 */
+
 /// Function to compute GCM cryptographic tag from ciphertext + AAD
 pub fn compute_tag(
     ciphertext: &[u8],
@@ -35,18 +36,17 @@ pub fn compute_tag(
     // generate H by encrypting block of 0s
     let h = encrypt_block(&[0u8; 16], round_keys);
 
+    // precompute GHASH tables for H
+    let gkey = GHashKey::new(h);
+
     // s = ghash accumulator
     let mut s = [0u8; 16];
 
-    // compute s over AAD
-    for aad_chunk in aad.chunks(16) {
-        s = gf_mul(xor_chunks(&s, aad_chunk), h);
-    }
+    // compute s over AAD (zero-pads final partial block)
+    gkey.ghash_update(&mut s, aad);
 
-    // compute s over ciphertext
-    for ct_chunk in ciphertext.chunks(16) {
-        s = gf_mul(xor_chunks(&s, ct_chunk), h);
-    }
+    // compute s over ciphertext (zero-pads final partial block)
+    gkey.ghash_update(&mut s, ciphertext);
 
     // authenticate message length, build aad_size || ct_size
     let aad_size = (aad.len() as u64) * 8; // size in bits
@@ -55,10 +55,81 @@ pub fn compute_tag(
     len[..8].copy_from_slice(&aad_size.to_be_bytes());
     len[8..].copy_from_slice(&ct_size.to_be_bytes());
 
-    s = gf_mul(xor_chunks(&s, &len), h);
+    // s = (s xor len) * H
+    for i in 0..16 {
+        s[i] ^= len[i];
+    }
+    s = gkey.mul(s);
 
     // tag = E(K, J0) ^ S
     Ok(xor_chunks(&s, &j0_e))
+}
+
+
+/// Precomputed tables for fast GHASH multiplication by fixed H. This struct written with LLM assistance.
+struct GHashKey {
+    // 32 nibbles across 16 bytes, each nibble 0..15 contributes a u128
+    table: [[u128; 16]; 32],
+}
+
+impl GHashKey {
+    /// Build the precomputed nibble tables for this H
+    fn new(h: [u8; 16]) -> Self {
+        let mut table = [[0u128; 16]; 32];
+
+        // v_pos corresponds to the v value at the start of this nibble position
+        // (i.e., after shifting for all earlier bits)
+        let mut v_pos = u128::from_be_bytes(h);
+
+        for pos in 0..32 {
+            for nib in 0..16u8 {
+                let mut acc = 0u128;
+                let mut v = v_pos;
+
+                // Consume nibble bits MSB -> LSB
+                for k in 0..4 {
+                    let bit = (nib >> (3 - k)) & 1;
+                    acc ^= v & (0u128.wrapping_sub(bit as u128));
+                    v = mul_x(v);
+                }
+
+                table[pos][nib as usize] = acc;
+            }
+
+            // Advance v_pos by 4 bits for next nibble position
+            v_pos = mul_x4(v_pos);
+        }
+
+        Self { table }
+    }
+
+    /// Update GHASH accumulator `s` with arbitrary-length data (AAD or ciphertext).
+    #[inline(always)]
+    fn ghash_update(&self, s: &mut [u8; 16], data: &[u8]) {
+        for chunk in data.chunks(16) {
+            for i in 0..chunk.len() {
+                s[i] ^= chunk[i];
+            }
+            *s = self.mul(*s);
+        }
+    }
+
+    /// Compute x * H (GHASH field multiply) using the precomputed table.
+    #[inline(always)]
+    fn mul(&self, x: [u8; 16]) -> [u8; 16] {
+        let mut z = 0u128;
+        let mut pos = 0usize;
+
+        // process bytes 0..15, high nibble then low nibble (MSB -> LSB)
+        for &b in x.iter() {
+            z ^= self.table[pos][(b >> 4) as usize];
+            pos += 1;
+            z ^= self.table[pos][(b & 0x0F) as usize];
+            pos += 1;
+        }
+
+        z.to_be_bytes()
+    }
 }
 
 
@@ -68,7 +139,7 @@ mod test_gcm {
     use super::*;
     use crate::aesp::cipher::Cipher;
     use crate::aesp::key::Key;
-    use crate::aesp::modes::util::test_util::{hex_to_bytes, hex_to_arr_12, hex_to_arr_16};
+    use crate::aesp::modes::util::test_util::{hex_to_arr_12, hex_to_arr_16, hex_to_bytes};
 
     // all test vectors from
     // https://boringssl.googlesource.com/boringssl.git/%2B/734fca08902889c88e84839134262bdf5c12eebf/crypto/cipher/cipher_test.txt
