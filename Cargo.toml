@@ -2,7 +2,7 @@
 name = "aesp"
 version = "1.0.0"
 authors = ["Toby Grice"]
-description = "AES parallel encryption/decryption tool | Toby Grice"
+description = "AES parallel encryption/decryption library | Toby Grice"
 edition = "2024"
 
 [dependencies]

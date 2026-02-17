@@ -1,4 +1,4 @@
-# AES in Rust
+# AES Parallelised
 
 ## About
 
