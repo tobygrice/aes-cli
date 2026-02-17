@@ -20,7 +20,7 @@ pub enum CliError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Aes(#[from] aes::Error),
+    Aes(#[from] aesp::Error),
 }
 
 fn main() {
@@ -46,19 +46,19 @@ fn aes_cli() -> Result<(), CliError> {
             // read or generate key
             let key = if enc.gen_key {
                 let rand_key = match enc.key_size {
-                    args::KeySize::Bits128 => aes::Key::rand_key_128()?,
-                    args::KeySize::Bits192 => aes::Key::rand_key_192()?,
-                    args::KeySize::Bits256 => aes::Key::rand_key_256()?,
+                    args::KeySize::Bits128 => aesp::Key::rand_key_128()?,
+                    args::KeySize::Bits192 => aesp::Key::rand_key_192()?,
+                    args::KeySize::Bits256 => aesp::Key::rand_key_256()?,
                 };
                 fs::write(key_path, &rand_key.as_bytes())?;
                 rand_key
             } else {
                 // read key from key_path
                 let key_bytes = fs::read(key_path)?;
-                aes::Key::try_from_slice(&key_bytes)?
+                aesp::Key::try_from_slice(&key_bytes)?
             };
 
-            let cipher = aes::Cipher::new(&key);
+            let cipher = aesp::Cipher::new(&key);
 
             // parse AAD
             let aad: Option<Vec<u8>> = match enc.aad {
@@ -99,9 +99,9 @@ fn aes_cli() -> Result<(), CliError> {
             // read inputs
             let ciphertext = fs::read(input_path)?;
             let key_bytes = fs::read(key_path)?;
-            let key = aes::Key::try_from_slice(&key_bytes)?;
+            let key = aesp::Key::try_from_slice(&key_bytes)?;
 
-            let cipher = aes::Cipher::new(&key);
+            let cipher = aesp::Cipher::new(&key);
 
             let start = Instant::now();
 
@@ -155,8 +155,8 @@ fn parse_aad(s: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
 #[cfg(test)]
 mod test {
     #[test]
-    fn sample_test() {
-        use aes::{Cipher, Key};
+    fn readme_sample_test() {
+        use aesp::{Cipher, Key};
 
         // generate a random 256-bit key.
         let key = Key::rand_key_256().expect("Random key generation failed");
@@ -169,7 +169,7 @@ mod test {
 
         // encrypt the plaintext bytes using AES-256-CTR.
         // note that the key size does not need to be explicitly stated.
-        let ciphertext = cipher.encrypt_ctr(&plaintext).expect("Counter overflow");
+        let ciphertext = cipher.encrypt_ctr(plaintext).expect("Counter overflow");
 
         // decrypt the resultant ciphertext.
         let decrypted_ct = cipher.decrypt_ctr(&ciphertext).expect("Counter overflow");
@@ -178,7 +178,7 @@ mod test {
         assert_eq!(plaintext, decrypted_ct);
 
         // for ECB mode:
-        let ecb_ciphertext = cipher.encrypt_ecb(&plaintext);
+        let ecb_ciphertext = cipher.encrypt_ecb(plaintext);
         let ecb_plaintext = cipher
             .decrypt_ecb(&ecb_ciphertext)
             .expect("Invalid ciphertext");
@@ -187,7 +187,7 @@ mod test {
         // for GCM with AAD:
         let aad = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let gcm_ciphertext = cipher
-            .encrypt_gcm(&plaintext, Some(&aad))
+            .encrypt_gcm(plaintext, Some(&aad))
             .expect("Counter overflow");
 
         // decrypt GCM returns a tuple containing (plaintext, Option(aad))

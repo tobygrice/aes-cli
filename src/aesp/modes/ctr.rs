@@ -12,6 +12,10 @@ pub fn ctr_core(
     iv: &[u8; 12],
     ctr_start: u32,
 ) -> Result<Vec<u8>> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    
     // check for counter overflow
     let num_blocks = u32::try_from((input.len() + 15) / 16).map_err(|_| Error::CounterOverflow)?;
     ctr_start

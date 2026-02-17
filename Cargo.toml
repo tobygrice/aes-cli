@@ -1,12 +1,26 @@
 [package]
-name = "aes"
-version = "0.1.0"
+name = "aesp"
+version = "1.0.0"
 authors = ["Toby Grice"]
-description = "AES encryption/decryption tool | Toby Grice"
+description = "AES parallel encryption/decryption tool | Toby Grice"
 edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.56", features = ["derive"] }
+hex-literal = { version = "1.1.0", optional = true }
 rand = "0.9.2"
 rayon = "1.11.0"
 thiserror = "2.0.18"
+
+[features]
+test-vectors = ["dep:hex-literal"]
+
+[[test]]
+name = "aes128gcm"
+path = "tests/vectors/aes128gcm.rs"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "aes256gcm"
+path = "tests/vectors/aes256gcm.rs"
+required-features = ["test-vectors"]

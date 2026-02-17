@@ -53,7 +53,8 @@ impl Cipher {
     pub fn encrypt_ctr(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         // generate IV and prepend to ciphertext
         let iv = random_iv()?;
-        let mut ciphertext: Vec<u8> = iv.to_vec();
+        let mut ciphertext = Vec::with_capacity(12 + plaintext.len());
+        ciphertext.extend_from_slice(&iv);
         ciphertext.append(&mut ctr_core(plaintext, &self.round_keys, &iv, 0)?);
         Ok(ciphertext)
     }
@@ -87,15 +88,24 @@ impl Cipher {
     ///
     /// Output is formatted as `IV (12 bytes) || AAD length (4 bytes) || AAD || Ciphertext || Tag (16 bytes)`
     pub fn encrypt_gcm(&self, plaintext: &[u8], aad: Option<&[u8]>) -> Result<Vec<u8>> {
+        // generate random IV
         let iv = random_iv()?;
-        let mut out: Vec<u8> = iv.to_vec();
 
-        // prepend AAD len and AAD
+        // calculate AAD size
         let aad_bytes = aad.unwrap_or(&[]);
-        out.extend_from_slice(&(aad_bytes.len() as u32).to_be_bytes());
+        let aad_len: u32 = aad_bytes
+            .len()
+            .try_into()
+            .expect("AAD size cannot exceed 2^32 bytes");
+
+        // initialise output vector
+        let mut out = Vec::with_capacity(12 + 4 + aad_bytes.len() + plaintext.len() + 16);
+
+        // build output: IV (12 bytes) || AAD length (4 bytes) || AAD || Ciphertext || Tag (16 bytes)
+        out.extend_from_slice(&iv);
+        out.extend_from_slice(&aad_len.to_be_bytes());
         out.extend_from_slice(aad_bytes);
 
-        // compute ciphertext and tag
         let mut ct = ctr_core(plaintext, &self.round_keys, &iv, 2)?;
         let tag = compute_tag(&ct, &self.round_keys, &iv, aad_bytes)?;
 
@@ -225,6 +235,36 @@ impl Cipher {
         round_keys
     }
 }
+
+#[cfg(feature = "test-vectors")]
+impl Cipher {
+    pub fn encrypt_gcm_with_iv(
+        &self,
+        plaintext: &[u8],
+        aad: Option<&[u8]>,
+        iv: &[u8; 12],
+    ) -> Result<Vec<u8>> {
+        let aad_bytes = aad.unwrap_or(&[]);
+        let aad_len_u32: u32 = aad_bytes
+            .len()
+            .try_into()
+            .expect("AAD size cannot exceed 2^32 bytes");
+
+        let mut out = Vec::with_capacity(12 + 4 + aad_bytes.len() + plaintext.len() + 16);
+
+        out.extend_from_slice(iv);
+        out.extend_from_slice(&aad_len_u32.to_be_bytes());
+        out.extend_from_slice(aad_bytes);
+
+        let mut ct = ctr_core(plaintext, &self.round_keys, iv, 2)?;
+        let tag = compute_tag(&ct, &self.round_keys, iv, aad_bytes)?;
+
+        out.append(&mut ct);
+        out.extend_from_slice(&tag);
+        Ok(out)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

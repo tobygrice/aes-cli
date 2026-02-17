@@ -12,7 +12,7 @@
 //! ## Examples
 //! Below is an example of a string being encrypted under a random key using AES-256-CTR, then decrypted back to plaintext.
 //! ```
-//! use aes::{Key, Cipher};
+//! use aesp::{Key, Cipher};
 //! 
 //! // generate a random 256-bit key.
 //! let key = Key::rand_key_256().expect("Random key generation failed");
@@ -33,7 +33,6 @@
 //! // round trip results in the same plaintext as the original message.
 //! assert_eq!(plaintext, decrypted_ct);
 //! ```
-//! 
 
 mod aesp;
 
