@@ -43,7 +43,7 @@ A `Result` type containing an `AesError` is also exported, which is returned by 
 ```rust
 use aesp::{Key, Cipher};
 
-// generate a random 256-bit key. Also available: try_from_slice, rand_key_128, and rand_key_192
+// generate a random 256-bit key. Also available: try_from_slice, rand_key_128, and rand_key_192.
 let key = Key::rand_key_256().expect("Random key generation failed");
 
 // instantiate a cipher object using that key.
