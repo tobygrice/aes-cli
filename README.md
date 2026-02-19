@@ -6,7 +6,7 @@ An AES library targeting performance through parallelism.
 
 Supported modes are ECB, CTR, and GCM. A CLI binary is also available as an optional feature.
 
-Library documentation is available on [docs.rs](docs.rs/aesp).
+Library documentation is available on [docs.rs](https://docs.rs/aesp).
 
 This is a personal project, not intended for production -- use at your own risk!
 
