@@ -20,14 +20,14 @@ cargo install aesp --features cli
 
 If you would prefer not to use `cargo`, you can download the binaries from the [releases page](https://github.com/tobygrice/aesp/releases) on GitHub.
 
-Once installed, usage is simple:
+Once installed, usage is simple. The example below encrypts and decrypts `plaintext.txt` using a random key with aes256ctr:
 
 ```bash
-aesp encrypt -i plaintext.txt -o ciphertext -k keyfile --gen-key
-aesp decrypt -i ciphertext -o decrypted.txt -k keyfile
+aesp encrypt -i plaintext.txt -o ciphertext -k keyfile -m ctr --gen-key
+aesp decrypt -i ciphertext -o decrypted.txt -k keyfile -m ctr
 ```
 
-The `help` command prints the following:
+For more information, the CLI can print the following `--help` message.
 
 ```plaintext
 Usage: aesp <COMMAND>
@@ -44,7 +44,7 @@ Options:
 
 ### Encryption
 
-Encryption usage is as follows:
+The CLI prints the following `--help` message for encryption:
 
 ```plaintext
 Encrypt input to output
@@ -64,7 +64,7 @@ Options:
 
 ### Decryption
 
-Decryption usage is as follows:
+The CLI prints the following `--help` message for decryption:
 
 ```plaintext
 Decrypt input to output
@@ -82,10 +82,10 @@ Options:
 
 The API exports two structs:
 
-- `AesKey` - stores key bytes, used to instantiate an `AesCipher`
-- `AesCipher` - stores round keys and provides encryption/decryption functions
+- `AesKey` -- stores key bytes, used to instantiate an `AesCipher`
+- `AesCipher` -- stores round keys and provides encryption/decryption functions
 
-A `Result` type containing an `AesError` is also exported, which is returned by most encryption/decryption functions.
+A `Result` type containing an AES `Error` is also exported, which is returned by most encryption/decryption functions.
 
 ### Examples
 
