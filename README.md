@@ -10,11 +10,11 @@ Library documentation is available on [docs.rs](https://docs.rs/aesp).
 
 ## Security
 
-This is a personal project that is not intended for production and has not been audited. Use at your own risk!
+This is a personal project that is not intended for production and has not been audited. **Use at your own risk!**
 
 If you wish to verify correctness, public test vectors are included in the repository which extensively test the GCM and ECB modes.
 
-In order to run these tests, clone the repo and run:
+In order to execute these tests, clone the repo and run:
 
 ```bash
 cargo test --features test-vectors
