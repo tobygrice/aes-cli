@@ -8,7 +8,17 @@ Supported modes are ECB, CTR, and GCM. A CLI binary is also available as an opti
 
 Library documentation is available on [docs.rs](https://docs.rs/aesp).
 
-This is a personal project, not intended for production -- use at your own risk!
+## Security
+
+This is a personal project that is not intended for production and has not been audited. Use at your own risk!
+
+If you wish to verify correctness, public test vectors are included in the repository which extensively test the GCM and ECB modes.
+
+In order to run these tests, clone the repo and run:
+
+```bash
+cargo test --features test-vectors
+```
 
 ## CLI Usage
 
@@ -20,12 +30,14 @@ cargo install aesp --features cli
 
 If you would prefer not to use `cargo`, you can download the binaries from the [releases page](https://github.com/tobygrice/aesp/releases) on GitHub.
 
-Once installed, usage is simple. The example below encrypts and decrypts `plaintext.txt` using a random key with aes256ctr:
+Once installed, usage is simple. The example below encrypts and decrypts `plaintext.txt` using a random key with aes256gcm:
 
 ```bash
-aesp encrypt -i plaintext.txt -o ciphertext -k keyfile -m ctr --gen-key
-aesp decrypt -i ciphertext -o decrypted.txt -k keyfile -m ctr
+aesp encrypt -i plaintext.txt -o ciphertext -k keyfile --gen-key
+aesp decrypt -i ciphertext -o decrypted.txt -k keyfile
 ```
+
+Note that a 256-bit key is the default for `--gen-key`, and `GCM` is the default mode if one is not specified.
 
 For more information, the CLI can print the following `--help` message.
 
@@ -126,7 +138,7 @@ assert_eq!(plaintext, gcm_plaintext);
 assert_eq!(Some(aad), res_aad);
 ```
 
-## Features Roadmap (complete)
+## Features Roadmap (Complete)
 
 Library roadmap:
 
