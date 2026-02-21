@@ -12,8 +12,8 @@ The library is published on [crates.io](https://crates.io/crates/aesp) for publi
 
 This is a personal project that is not intended for production and has not been audited. **Use at your own risk!**
 
-For educational purposes, this is a pure-software implementation of AES. Modern processors provide hardware AES, which is utilised by libraries such as RustCrypto.
-Prefer these libraries to AESP, as they will almost always outperform this one.
+For educational purposes, this is a pure-Rust software implementation of AES. Modern processors provide hardware AES, which is utilised by libraries
+such as RustCrypto to provide constant-time encryption. Always prefer these libraries to AESP, as they will almost always outperform this one.
 
 If you wish to verify correctness, public test vectors are included in the repository which extensively test the GCM and ECB modes.
 
