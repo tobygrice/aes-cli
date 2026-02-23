@@ -1,6 +1,6 @@
 [package]
 name = "aesp"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Toby Grice"]
 description = "Library and optional CLI for AES in parallel. Personal project -- use at your own risk."
 edition = "2024"
